@@ -67,7 +67,52 @@ void ssufs_close(int file_handle){
 }
 
 int ssufs_read(int file_handle, char *buf, int nbytes){
-	/* 4 */
+	struct filehandle_t *fh;
+	struct inode_t inode;
+	int blocknum, i, j, need_chunk_cnt;
+	char read_data[BLOCKSIZE * MAX_FILE_SIZE + 1];
+	char tmp[BLOCKSIZE + 1];
+	memset(read_data, 0, BLOCKSIZE * MAX_FILE_SIZE + 1);
+	memset(tmp, 0, BLOCKSIZE + 1);
+	// fd는 최대 0 ~ 7까지 배정할 수 있음
+	if (0 <= file_handle && file_handle >= MAX_OPEN_FILES) {
+		return -1;
+	}
+	fh = &file_handle_array[file_handle];
+	// 아직 할당되지 않은 fh인 경우 에러
+	if (fh->inode_number == -1) {
+		return -1;
+	}
+	// offset 끝에 도달함
+	if (fh->offset == MAX_FILE_SIZE) {
+		return -1;
+	}
+	// inode를 불러옴
+	ssufs_readInode(fh->inode_number, &inode);
+	/** chunk를 계산 **/
+	// 최대 할당 크기인 256 bytes 보다 작아야함
+	if (nbytes > BLOCKSIZE * MAX_FILE_SIZE) {
+		return -1;
+	}
+	// 필요한 청크의 개수를 구함
+	if (nbytes % BLOCKSIZE == 0) {
+		need_chunk_cnt = nbytes / BLOCKSIZE;
+	}
+	else {
+		need_chunk_cnt = nbytes / BLOCKSIZE + 1;
+	}
+	// 데이터 읽기
+	for (i = 0; i < need_chunk_cnt; i++) {
+		if (inode.direct_blocks[fh->offset] != -1) {
+			ssufs_readDataBlock(inode.direct_blocks[fh->offset], tmp);
+			strcat(read_data, tmp);
+			ssufs_lseek(file_handle, 1);
+		}
+	}
+	// nbytes 만큼 자름
+	strncpy(buf, read_data, nbytes);
+	buf[strlen(buf)] = 0;
+	return 0;
 }
 
 int ssufs_write(int file_handle, char *buf, int nbytes){
@@ -75,6 +120,7 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	struct inode_t inode;
 	int blocknum, i, j, need_chunk_cnt;
 	char recovery[MAX_FILE_SIZE][BLOCKSIZE];
+	int recovery_direct[MAX_FILE_SIZE];
 	char tmp[BLOCKSIZE + 1];
 	memset(tmp, 0, BLOCKSIZE);
 	memset(recovery, 0, MAX_FILE_SIZE * BLOCKSIZE);
@@ -110,6 +156,7 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 		if (inode.direct_blocks[i] != -1) {
 			ssufs_readDataBlock(inode.direct_blocks[i], tmp);  
 			strcpy(recovery[i], tmp);
+			recovery_direct[i] = inode.direct_blocks[i];
 		}
 	}
 	// 데이터 쓰기
@@ -117,9 +164,11 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 		// 블럭이 없는 경우 새로운 블록을 할당해야함
 		if (inode.direct_blocks[fh->offset] == -1) {
 			if ((blocknum = ssufs_allocDataBlock()) == -1) {
-				// 데이터 블록 복구
+				// 데이터 블럭 복구
+				memset(inode.direct_blocks, -1, MAX_FILE_SIZE);
 				for (i = 0; i < MAX_FILE_SIZE; i++) {
 					if (recovery[i][0] != 0) {
+						inode.direct_blocks[i] = recovery_direct[i];
 						ssufs_writeDataBlock(inode.direct_blocks[i], recovery[i]);
 					}
 				}
