@@ -87,14 +87,8 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	}
 	// inode를 불러옴
 	ssufs_readInode(fh->inode_number, &inode);
-	// 현재 몇개의 block이 할당되었는지 확인
-	for (i = 0; i < MAX_FILE_SIZE; i++) {
-		if (inode.direct_blocks[i] == -1) {
-			direct_start = i;
-			break;
-		}
-	}
-	alloc_cnt = i;
+	// offset 
+	direct_start = fh->offset;
 	// 4개가 모두 할당되어 있으면 error
 	if (alloc_cnt == MAX_FILE_SIZE) {
 		return -1;
@@ -130,6 +124,7 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 		inode.file_size += strlen(chunk[i]);
 		ssufs_writeInode(fh->inode_number, &inode); // inode 갱신
 	}
+	fh->offset = direct_start + i;
 	return 0;
 }
 
