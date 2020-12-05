@@ -74,8 +74,10 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	struct filehandle_t *fh;
 	struct inode_t inode;
 	int blocknum, i, j, need_chunk_cnt;
+	char recovery[MAX_FILE_SIZE][BLOCKSIZE];
 	char tmp[BLOCKSIZE + 1];
 	memset(tmp, 0, BLOCKSIZE);
+	memset(recovery, 0, MAX_FILE_SIZE * BLOCKSIZE);
 	// fd는 최대 0 ~ 7까지 배정할 수 있음
 	if (0 <= file_handle && file_handle >= MAX_OPEN_FILES) {
 		return -1;
@@ -103,14 +105,23 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	else {
 		need_chunk_cnt = nbytes / BLOCKSIZE + 1;
 	}
-	// block을 할당하고 스트링을 복사
+	// 실패할 경우 복구를 위해 copy
+	for (i = 0; i < MAX_FILE_SIZE; i++) {
+		if (inode.direct_blocks[i] != -1) {
+			ssufs_readDataBlock(inode.direct_blocks[i], tmp);  
+			strcpy(recovery[i], tmp);
+		}
+	}
+	// 데이터 쓰기
 	for (i = 0; i < need_chunk_cnt; i++) {
 		// 블럭이 없는 경우 새로운 블록을 할당해야함
 		if (inode.direct_blocks[fh->offset] == -1) {
 			if ((blocknum = ssufs_allocDataBlock()) == -1) {
-				// 데이터 블록을 가져오는데 실패했으므로 기존의 메모리를 모두 회수해야함
-				for (j = i; j >= 0; j--) {
-					ssufs_freeDataBlock(inode.direct_blocks[fh->offset + j]);
+				// 데이터 블록 복구
+				for (i = 0; i < MAX_FILE_SIZE; i++) {
+					if (recovery[i][0] != 0) {
+						ssufs_writeDataBlock(inode.direct_blocks[i], recovery[i]);
+					}
 				}
 				return -1;
 			}
