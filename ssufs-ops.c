@@ -11,16 +11,54 @@ int ssufs_allocFileHandle() {
 	return -1;
 }
 
-int ssufs_create(char *filename){
-	/* 1 */
+int ssufs_create(char *filename){	
+	int inodenum;
+	struct inode_t inode;
+	// 이미 생성된 파일인지 확인
+	if (open_namei(filename) > -1) {
+		return -1;
+	}
+	// 비어 있는 inode 할당
+	if((inodenum = ssufs_allocInode()) == -1) {
+		return -1;
+	}
+	// inode 초기화
+	inode.status = INODE_IN_USE;
+	strcpy(inode.name, filename);
+	inode.file_size = 0;
+	memset(inode.direct_blocks, -1, sizeof(int) * MAX_FILE_SIZE);
+	ssufs_writeInode(inodenum, &inode);
 }
 
 void ssufs_delete(char *filename){
-	/* 2 */
+	int inodenum;
+	struct inode_t inode;
+	// inode 번호 불러오기
 }
 
 int ssufs_open(char *filename){
-	/* 3 */
+	int inodenum, fd, i = -1;
+	struct inode_t inode;
+	// inode 번호 불러오기
+	if ((inodenum = open_namei(filename)) == -1) {
+		return -1;
+	}
+	// 비어있는 filehandle 인덱스 찾기
+	for (i = 0; i < MAX_OPEN_FILES; i++) {
+		if (file_handle_array[i].inode_number == -1) {
+			fd = i;
+			break;
+		}
+	}
+	// 비어있는 filehandle이 없음
+	if (fd == -1) {
+		return -1;
+	}
+	// file_handle_array를 설정하고 fd를 리턴
+	else {
+		file_handle_array[fd].inode_number = inodenum;
+		return fd;
+	}
 }
 
 void ssufs_close(int file_handle){
@@ -33,7 +71,66 @@ int ssufs_read(int file_handle, char *buf, int nbytes){
 }
 
 int ssufs_write(int file_handle, char *buf, int nbytes){
-	/* 5 */
+	struct filehandle_t *fh;
+	struct inode_t inode;
+	int blocknum, i, j, alloc_cnt = 0, need_chunk_cnt, left_block, direct_start;
+	char chunk[MAX_FILE_SIZE][BLOCKSIZE];
+	memset(chunk, 0, MAX_FILE_SIZE * BLOCKSIZE);
+	// fd는 최대 0 ~ 7까지 배정할 수 있음
+	if (0 <= file_handle && file_handle >= MAX_OPEN_FILES) {
+		return -1;
+	}
+	fh = &file_handle_array[file_handle];
+	// 아직 할당되지 않은 fh인 경우 에러
+	if (fh->inode_number == -1) {
+		return -1;
+	}
+	// inode를 불러옴
+	ssufs_readInode(fh->inode_number, &inode);
+	// 현재 몇개의 block이 할당되었는지 확인
+	for (i = 0; i < MAX_FILE_SIZE; i++) {
+		if (inode.direct_blocks[i] == -1) {
+			direct_start = i;
+			break;
+		}
+	}
+	alloc_cnt = i;
+	// 4개가 모두 할당되어 있으면 error
+	if (alloc_cnt == MAX_FILE_SIZE) {
+		return -1;
+	}
+	// 남은 block의 개수를 계산함
+	else {
+		left_block = MAX_FILE_SIZE - alloc_cnt;
+	}
+	/** chunk를 계산 **/
+	// 최대 할당 크기인 256 bytes 보다 작아야함
+	if (nbytes > BLOCKSIZE * MAX_FILE_SIZE) {
+		return -1;
+	}
+	// 필요한 청크의 개수를 구함
+	if (nbytes % BLOCKSIZE == 0) {
+		need_chunk_cnt = nbytes / BLOCKSIZE;
+	}
+	else {
+		need_chunk_cnt = nbytes / BLOCKSIZE + 1;
+	}
+	// block을 할당하고 스트링을 복사
+	for (i = 0; i < need_chunk_cnt; i++) {
+		if ((blocknum = ssufs_allocDataBlock()) == -1) {
+			// 데이터 블록을 가져오는데 실패했으므로 기존의 메모리를 모두 회수해야함
+			for (j = i; j >= 0; j--) {
+				ssufs_freeDataBlock(inode.direct_blocks[direct_start + j]);
+			}
+			return -1;
+		}
+		inode.direct_blocks[direct_start + i] = blocknum;
+		strncpy(chunk[i], buf + BLOCKSIZE * i, BLOCKSIZE); // chunk Data 생성 
+		ssufs_writeDataBlock(blocknum, chunk[i]); // 스트링 복사
+		inode.file_size += strlen(chunk[i]);
+		ssufs_writeInode(fh->inode_number, &inode); // inode 갱신
+	}
+	return 0;
 }
 
 int ssufs_lseek(int file_handle, int nseek){
