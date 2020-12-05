@@ -31,9 +31,12 @@ int ssufs_create(char *filename){
 }
 
 void ssufs_delete(char *filename){
-	int inodenum;
+	int inodenum, fd, i;
 	struct inode_t inode;
 	// inode 번호 불러오기
+	if ((inodenum = open_namei(filename)) != -1) {
+		ssufs_freeInode(inodenum);
+	}
 }
 
 int ssufs_open(char *filename){
