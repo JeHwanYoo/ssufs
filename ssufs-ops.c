@@ -73,7 +73,7 @@ int ssufs_read(int file_handle, char *buf, int nbytes){
 int ssufs_write(int file_handle, char *buf, int nbytes){
 	struct filehandle_t *fh;
 	struct inode_t inode;
-	int blocknum, i, j, alloc_cnt = 0, need_chunk_cnt, left_block, direct_start;
+	int blocknum, i, j, need_chunk_cnt;
 	char chunk[MAX_FILE_SIZE][BLOCKSIZE];
 	memset(chunk, 0, MAX_FILE_SIZE * BLOCKSIZE);
 	// fd는 최대 0 ~ 7까지 배정할 수 있음
@@ -85,18 +85,12 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	if (fh->inode_number == -1) {
 		return -1;
 	}
-	// inode를 불러옴
-	ssufs_readInode(fh->inode_number, &inode);
-	// offset 
-	direct_start = fh->offset;
-	// 4개가 모두 할당되어 있으면 error
-	if (alloc_cnt == MAX_FILE_SIZE) {
+	// offset 끝에 도달함
+	if (fh->offset == MAX_FILE_SIZE) {
 		return -1;
 	}
-	// 남은 block의 개수를 계산함
-	else {
-		left_block = MAX_FILE_SIZE - alloc_cnt;
-	}
+	// inode를 불러옴
+	ssufs_readInode(fh->inode_number, &inode);
 	/** chunk를 계산 **/
 	// 최대 할당 크기인 256 bytes 보다 작아야함
 	if (nbytes > BLOCKSIZE * MAX_FILE_SIZE) {
@@ -111,20 +105,23 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	}
 	// block을 할당하고 스트링을 복사
 	for (i = 0; i < need_chunk_cnt; i++) {
-		if ((blocknum = ssufs_allocDataBlock()) == -1) {
-			// 데이터 블록을 가져오는데 실패했으므로 기존의 메모리를 모두 회수해야함
-			for (j = i; j >= 0; j--) {
-				ssufs_freeDataBlock(inode.direct_blocks[direct_start + j]);
+		// 블럭이 없는 경우 새로운 블록을 할당해야함
+		if (inode.direct_blocks[fh->offset] == -1) {
+			if ((blocknum = ssufs_allocDataBlock()) == -1) {
+				// 데이터 블록을 가져오는데 실패했으므로 기존의 메모리를 모두 회수해야함
+				for (j = i; j >= 0; j--) {
+					ssufs_freeDataBlock(inode.direct_blocks[fh->offset + j]);
+				}
+				return -1;
 			}
-			return -1;
+			inode.direct_blocks[fh->offset] = blocknum;
 		}
-		inode.direct_blocks[direct_start + i] = blocknum;
 		strncpy(chunk[i], buf + BLOCKSIZE * i, BLOCKSIZE); // chunk Data 생성 
 		ssufs_writeDataBlock(blocknum, chunk[i]); // 스트링 복사
 		inode.file_size += strlen(chunk[i]);
 		ssufs_writeInode(fh->inode_number, &inode); // inode 갱신
+		ssufs_lseek(file_handle, 1);
 	}
-	fh->offset = direct_start + i;
 	return 0;
 }
 
@@ -133,9 +130,9 @@ int ssufs_lseek(int file_handle, int nseek){
 
 	struct inode_t *tmp = (struct inode_t *) malloc(sizeof(struct inode_t));
 	ssufs_readInode(file_handle_array[file_handle].inode_number, tmp);
-	
+
 	int fsize = tmp->file_size;
-	
+
 	offset += nseek;
 
 	if ((fsize == -1) || (offset < 0) || (offset > fsize)) {
