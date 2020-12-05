@@ -74,8 +74,8 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 	struct filehandle_t *fh;
 	struct inode_t inode;
 	int blocknum, i, j, need_chunk_cnt;
-	char chunk[MAX_FILE_SIZE][BLOCKSIZE];
-	memset(chunk, 0, MAX_FILE_SIZE * BLOCKSIZE);
+	char tmp[BLOCKSIZE + 1];
+	memset(tmp, 0, BLOCKSIZE);
 	// fd는 최대 0 ~ 7까지 배정할 수 있음
 	if (0 <= file_handle && file_handle >= MAX_OPEN_FILES) {
 		return -1;
@@ -116,9 +116,15 @@ int ssufs_write(int file_handle, char *buf, int nbytes){
 			}
 			inode.direct_blocks[fh->offset] = blocknum;
 		}
-		strncpy(chunk[i], buf + BLOCKSIZE * i, BLOCKSIZE); // chunk Data 생성 
-		ssufs_writeDataBlock(blocknum, chunk[i]); // 스트링 복사
-		inode.file_size += strlen(chunk[i]);
+		// 덮어 쓰는 경우 기존 file_size를 감소시켜야함
+		else {
+			ssufs_readDataBlock(inode.direct_blocks[fh->offset], tmp);  
+			inode.file_size -= strlen(tmp); 
+		}
+		strncpy(tmp, buf + BLOCKSIZE * i, BLOCKSIZE); // chunk Data 생성 
+		tmp[BLOCKSIZE] = '\0';
+		ssufs_writeDataBlock(inode.direct_blocks[fh->offset], tmp); // 스트링 복사
+		inode.file_size += strlen(tmp);
 		ssufs_writeInode(fh->inode_number, &inode); // inode 갱신
 		ssufs_lseek(file_handle, 1);
 	}
