@@ -28,6 +28,7 @@ int ssufs_create(char *filename){
 	inode.file_size = 0;
 	memset(inode.direct_blocks, -1, sizeof(int) * MAX_FILE_SIZE);
 	ssufs_writeInode(inodenum, &inode);
+	return inodenum;
 }
 
 void ssufs_delete(char *filename){
